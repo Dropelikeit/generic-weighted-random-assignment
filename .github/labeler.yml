@@ -1,0 +1,31 @@
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "**/*.md"
+          - "docs/**"
+
+code:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/**"
+          - "tests/**"
+          - "**/*.rs"
+
+configuration:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "Dockerfile"
+          - "docker-compose.yml"
+          - "**/*.yml"
+          - "**/*.yaml"
+          - "**/*.toml"
+          - "**/*.json"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Cargo.toml"
+          - "Cargo.lock"
+          - ".github/dependabot.yml"

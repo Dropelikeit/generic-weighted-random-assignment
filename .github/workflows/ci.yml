@@ -2,21 +2,20 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
 jobs:
-  # ──────────────────────────────────────────────
-  # Lint: rustfmt + clippy
-  # ──────────────────────────────────────────────
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -35,9 +34,6 @@ jobs:
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  # ──────────────────────────────────────────────
-  # Test: run full test suite
-  # ──────────────────────────────────────────────
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -51,248 +47,3 @@ jobs:
 
       - name: Run tests
         run: cargo test --all-features --verbose
-
-  # ──────────────────────────────────────────────
-  # Version: determine semantic version from branch prefix
-  # ──────────────────────────────────────────────
-  version:
-    name: Determine Version
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
-    outputs:
-      new_version: ${{ steps.bump.outputs.new_version }}
-      skip_release: ${{ steps.bump.outputs.skip_release }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get merge commit message
-        id: merge_info
-        run: |
-          COMMIT_MSG=$(git log -1 --pretty=%s)
-          echo "commit_msg=$COMMIT_MSG" >> "$GITHUB_OUTPUT"
-
-          # Try to extract branch name from merge commit message
-          # Format: "Merge pull request #N from owner/branch-name"
-          BRANCH=$(echo "$COMMIT_MSG" | sed -n 's|.*Merge pull request .* from [^/]*/\(.*\)|\1|p')
-
-          # Fallback: direct push — use commit message prefix as pseudo-branch
-          if [ -z "$BRANCH" ]; then
-            BRANCH="$COMMIT_MSG"
-          fi
-
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          echo "Detected branch/message: $BRANCH"
-
-      - name: Determine version bump
-        id: bump
-        run: |
-          BRANCH="${{ steps.merge_info.outputs.branch }}"
-          PREFIX=$(echo "$BRANCH" | cut -d'/' -f1 | tr '[:upper:]' '[:lower:]')
-
-          echo "Branch prefix: $PREFIX"
-
-          case "$PREFIX" in
-            feat|feature)
-              BUMP="minor"
-              ;;
-            fix|bugfix|hotfix)
-              BUMP="patch"
-              ;;
-            breaking|major)
-              BUMP="major"
-              ;;
-            chore|docs|ci|style|refactor|perf|build)
-              echo "skip_release=true" >> "$GITHUB_OUTPUT"
-              echo "new_version=" >> "$GITHUB_OUTPUT"
-              echo "Skipping release for prefix: $PREFIX"
-              exit 0
-              ;;
-            *)
-              BUMP="patch"
-              ;;
-          esac
-
-          echo "skip_release=false" >> "$GITHUB_OUTPUT"
-
-          # Get latest tag or start at 0.0.0
-          LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="v0.0.0"
-          fi
-          echo "Latest tag: $LATEST_TAG"
-
-          # Parse version components
-          VERSION=${LATEST_TAG#v}
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-
-          case "$BUMP" in
-            major)
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-              ;;
-            minor)
-              MINOR=$((MINOR + 1))
-              PATCH=0
-              ;;
-            patch)
-              PATCH=$((PATCH + 1))
-              ;;
-          esac
-
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-          echo "New version: v$NEW_VERSION (bump: $BUMP)"
-
-  # ──────────────────────────────────────────────
-  # Build: cross-compile release binaries
-  # ──────────────────────────────────────────────
-  build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.version.outputs.skip_release != 'true'
-    needs: version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            artifact_name_api: wra-api
-            artifact_name_cli: wra
-            archive_ext: tar.gz
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            artifact_name_api: wra-api
-            artifact_name_cli: wra
-            archive_ext: tar.gz
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            artifact_name_api: wra-api
-            artifact_name_cli: wra
-            archive_ext: tar.gz
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            artifact_name_api: wra-api
-            artifact_name_cli: wra
-            archive_ext: tar.gz
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            artifact_name_api: wra-api.exe
-            artifact_name_cli: wra.exe
-            archive_ext: zip
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools (aarch64-linux)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
-
-      - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Package artifacts (Unix)
-        if: matrix.archive_ext == 'tar.gz'
-        run: |
-          DIST_DIR="wra-v${{ needs.version.outputs.new_version }}-${{ matrix.target }}"
-          mkdir -p "$DIST_DIR"
-          cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name_api }}" "$DIST_DIR/"
-          cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name_cli }}" "$DIST_DIR/"
-          cp README.md LICENSE* 2>/dev/null "$DIST_DIR/" || true
-          tar czf "${DIST_DIR}.tar.gz" "$DIST_DIR"
-          echo "ASSET=${DIST_DIR}.tar.gz" >> "$GITHUB_ENV"
-
-      - name: Package artifacts (Windows)
-        if: matrix.archive_ext == 'zip'
-        shell: pwsh
-        run: |
-          $distDir = "wra-v${{ needs.version.outputs.new_version }}-${{ matrix.target }}"
-          New-Item -ItemType Directory -Force -Path $distDir
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact_name_api }}" "$distDir/"
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact_name_cli }}" "$distDir/"
-          if (Test-Path "README.md") { Copy-Item "README.md" "$distDir/" }
-          Compress-Archive -Path "$distDir/*" -DestinationPath "$distDir.zip"
-          echo "ASSET=$distDir.zip" >> $env:GITHUB_ENV
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wra-${{ matrix.target }}
-          path: ${{ env.ASSET }}
-          retention-days: 5
-
-  # ──────────────────────────────────────────────
-  # Release: create GitHub release with tag + assets
-  # ──────────────────────────────────────────────
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-    needs: [version, build]
-    if: needs.version.outputs.skip_release != 'true'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-          if [ -z "$LATEST_TAG" ]; then
-            RANGE="HEAD"
-          else
-            RANGE="${LATEST_TAG}..HEAD"
-          fi
-
-          {
-            echo "changelog<<EOF"
-            echo "## What's Changed"
-            echo ""
-
-            for PREFIX_LABEL in "feat:Features" "fix:Bug Fixes" "perf:Performance" "refactor:Refactoring" "docs:Documentation"; do
-              PREFIX="${PREFIX_LABEL%%:*}"
-              LABEL="${PREFIX_LABEL##*:}"
-              COMMITS=$(git log "$RANGE" --pretty=format:"- %s (%h)" --grep="^${PREFIX}" 2>/dev/null || true)
-              if [ -n "$COMMITS" ]; then
-                echo "### $LABEL"
-                echo "$COMMITS"
-                echo ""
-              fi
-            done
-
-            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG:-initial}...v${{ needs.version.outputs.new_version }}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.version.outputs.new_version }}
-          name: v${{ needs.version.outputs.new_version }}
-          body: ${{ steps.changelog.outputs.changelog }}
-          draft: false
-          prerelease: false
-          files: artifacts/*
-          generate_release_notes: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,263 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  determine-version:
+    name: Determine Version
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+      previous_tag: ${{ steps.bump.outputs.previous_tag }}
+      skip_release: ${{ steps.bump.outputs.skip_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Determine semantic version
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+            RANGE="HEAD"
+          else
+            RANGE="${LATEST_TAG}..HEAD"
+          fi
+
+          echo "previous_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+          if git tag --points-at HEAD | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "skip_release=true" >> "$GITHUB_OUTPUT"
+            echo "new_version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          COMMITS=$(git log "$RANGE" --pretty=format:'%s%n%b%n---commit-end---')
+          if [ -z "$COMMITS" ]; then
+            echo "skip_release=true" >> "$GITHUB_OUTPUT"
+            echo "new_version=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BUMP="patch"
+          if printf '%s' "$COMMITS" | grep -Eq 'BREAKING CHANGE'; then
+            BUMP="major"
+          elif git log "$RANGE" --pretty=format:'%s' | grep -Eq '^[a-zA-Z0-9_-]+(\([^)]+\))?!:'; then
+            BUMP="major"
+          elif git log "$RANGE" --pretty=format:'%s' | grep -Eq '^feat(\([^)]+\))?:'; then
+            BUMP="minor"
+          fi
+
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          case "$BUMP" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          echo "skip_release=false" >> "$GITHUB_OUTPUT"
+          echo "new_version=${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: determine-version
+    if: needs.determine-version.outputs.skip_release != 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name_api: wra-api
+            artifact_name_cli: wra
+            archive_ext: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name_api: wra-api
+            artifact_name_cli: wra
+            archive_ext: tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact_name_api: wra-api
+            artifact_name_cli: wra
+            archive_ext: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name_api: wra-api
+            artifact_name_cli: wra
+            archive_ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name_api: wra-api.exe
+            artifact_name_cli: wra.exe
+            archive_ext: zip
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (aarch64-linux)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Build release binaries
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package artifacts (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        run: |
+          DIST_DIR="wra-v${{ needs.determine-version.outputs.new_version }}-${{ matrix.target }}"
+          mkdir -p "$DIST_DIR"
+          cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name_api }}" "$DIST_DIR/"
+          cp "target/${{ matrix.target }}/release/${{ matrix.artifact_name_cli }}" "$DIST_DIR/"
+          cp README.md LICENSE* 2>/dev/null "$DIST_DIR/" || true
+          tar czf "${DIST_DIR}.tar.gz" "$DIST_DIR"
+          echo "ASSET=${DIST_DIR}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package artifacts (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $distDir = "wra-v${{ needs.determine-version.outputs.new_version }}-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path $distDir
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact_name_api }}" "$distDir/"
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.artifact_name_cli }}" "$distDir/"
+          if (Test-Path "README.md") { Copy-Item "README.md" "$distDir/" }
+          Compress-Archive -Path "$distDir/*" -DestinationPath "$distDir.zip"
+          echo "ASSET=$distDir.zip" >> $env:GITHUB_ENV
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wra-${{ matrix.target }}
+          path: ${{ env.ASSET }}
+          retention-days: 5
+
+  release:
+    name: Create Tag and Release
+    needs:
+      - determine-version
+      - build
+    if: needs.determine-version.outputs.skip_release != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PREVIOUS_TAG="${{ needs.determine-version.outputs.previous_tag }}"
+          if [ "$PREVIOUS_TAG" = "v0.0.0" ] && ! git rev-parse "$PREVIOUS_TAG" >/dev/null 2>&1; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREVIOUS_TAG}..HEAD"
+          fi
+
+          {
+            echo "changelog<<EOF"
+            echo "## What's Changed"
+            echo ""
+
+            for ENTRY in \
+              "feat:Features" \
+              "fix:Bug Fixes" \
+              "perf:Performance" \
+              "refactor:Refactoring" \
+              "docs:Documentation" \
+              "chore:Maintenance"; do
+              PREFIX="${ENTRY%%:*}"
+              LABEL="${ENTRY##*:}"
+              COMMITS=$(git log "$RANGE" --pretty=format:'- %s (%h)' --grep="^${PREFIX}\\(.*\\)\\?:" || true)
+              if [ -n "$COMMITS" ]; then
+                echo "### $LABEL"
+                echo "$COMMITS"
+                echo ""
+              fi
+            done
+
+            OTHER_COMMITS=$(git log "$RANGE" --pretty=format:'- %s (%h)' --invert-grep --grep='^\(feat\|fix\|perf\|refactor\|docs\|chore\)\(.*\)\?:' || true)
+            if [ -n "$OTHER_COMMITS" ]; then
+              echo "### Other Changes"
+              echo "$OTHER_COMMITS"
+              echo ""
+            fi
+
+            if [ "${PREVIOUS_TAG}" = "v0.0.0" ]; then
+              echo "**Full Changelog**: Initial release"
+            else
+              echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...v${{ needs.determine-version.outputs.new_version }}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          target_commitish: ${{ github.event.workflow_run.head_sha }}
+          tag_name: v${{ needs.determine-version.outputs.new_version }}
+          name: v${{ needs.determine-version.outputs.new_version }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+          files: artifacts/*
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

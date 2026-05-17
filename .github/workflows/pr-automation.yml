@@ -1,0 +1,121 @@
+name: PR Automation
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  automate:
+    name: Reviewers, Assignee and Labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository metadata
+        uses: actions/checkout@v4
+
+      - name: Assign PR author
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            try {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                assignees: [pr.user.login],
+              });
+            } catch (error) {
+              if (error.status === 422) {
+                core.info(`Assignee could not be set: ${error.message}`);
+                return;
+              }
+              throw error;
+            }
+
+      - name: Request maintainer reviews
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+
+            const { data: collaborators } = await github.rest.repos.listCollaborators({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              affiliation: "direct",
+              per_page: 100,
+            });
+
+            const reviewers = collaborators
+              .filter((user) => !user.login.endsWith("[bot]"))
+              .filter((user) => user.login !== pr.user.login)
+              .filter((user) => {
+                const permission = user.role_name || "";
+                return ["write", "maintain", "admin"].includes(permission);
+              })
+              .map((user) => user.login)
+              .slice(0, 15);
+
+            if (reviewers.length === 0) {
+              core.info("No maintainers found for review request.");
+              return;
+            }
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                reviewers,
+              });
+            } catch (error) {
+              if (error.status === 422) {
+                core.info(`Reviewer request skipped: ${error.message}`);
+                return;
+              }
+              throw error;
+            }
+
+      - name: Ensure labels exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: "documentation", color: "0e8a16", description: "Documentation-only or documentation-heavy changes" },
+              { name: "code", color: "1d76db", description: "Application or test code changes" },
+              { name: "configuration", color: "5319e7", description: "Configuration, workflow or infrastructure changes" },
+              { name: "dependencies", color: "fbca04", description: "Dependency manifest or lockfile changes" },
+            ];
+
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: label.name,
+                });
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ...label,
+                });
+              }
+            }
+
+      - name: Apply labels from changed files
+        uses: actions/labeler@v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}

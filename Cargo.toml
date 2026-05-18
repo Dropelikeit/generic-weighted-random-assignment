@@ -20,7 +20,7 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1"
-axum = { version = "0.7", features = ["json"] }
+axum = { version = "0.8", features = ["json"] }
 clap = { version = "4", features = ["derive"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }

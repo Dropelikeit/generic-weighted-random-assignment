@@ -26,12 +26,19 @@ jobs:
         with:
           script: |
             const pr = context.payload.pull_request;
+            const authorLogin = pr.user.login;
+
+            if (authorLogin.endsWith("[bot]")) {
+              core.info(`Skipping assignee for bot PR author: ${authorLogin}`);
+              return;
+            }
+
             try {
               await github.rest.issues.addAssignees({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
-                assignees: [pr.user.login],
+                assignees: [authorLogin],
               });
             } catch (error) {
               if (error.status === 422) {

@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use rand::prelude::IndexedRandom;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::{Rng, SeedableRng};
@@ -98,7 +99,7 @@ fn weighted_select(candidates: &[(usize, f64)], rng: &mut StdRng) -> Option<usiz
         return candidates.choose(rng).map(|(idx, _)| *idx);
     }
 
-    let mut threshold = rng.gen::<f64>() * total_weight;
+    let mut threshold = rng.random::<f64>() * total_weight;
     for &(idx, weight) in candidates {
         threshold -= weight;
         if threshold < 0.0 {
@@ -153,7 +154,7 @@ pub fn generate_assignments(
 
     let mut rng = match seed {
         Some(s) => StdRng::seed_from_u64(s),
-        None => StdRng::from_entropy(),
+        None => StdRng::from_os_rng(),
     };
 
     for attempt in 0..MAX_RETRIES {
@@ -173,7 +174,7 @@ pub fn generate_assignments(
                 Some(s) => s
                     .wrapping_add(attempt as u64)
                     .wrapping_mul(6364136223846793005),
-                None => rng.gen(),
+                None => rng.random(),
             };
             rng = StdRng::seed_from_u64(reseed);
         }

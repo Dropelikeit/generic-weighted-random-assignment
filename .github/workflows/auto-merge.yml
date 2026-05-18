@@ -16,6 +16,8 @@ on:
       - CI
     types:
       - completed
+    branches-ignore:
+      - main
 
 permissions:
   actions: read
@@ -42,6 +44,23 @@ jobs:
               return context.payload.pull_request?.number ?? context.payload.review?.pull_request_url?.split("/").pop() ?? null;
             }
 
+            async function getSuccessfulCiRun(pr) {
+              const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head_sha: pr.head.sha,
+                per_page: 100,
+              });
+
+              return runs.workflow_runs.find((run) =>
+                run.name === "CI" &&
+                run.event === "pull_request" &&
+                run.status === "completed" &&
+                run.conclusion === "success" &&
+                run.head_branch === pr.head.ref
+              );
+            }
+
             const pullNumber = await getPullRequestNumber();
             if (!pullNumber) {
               core.info("No pull request associated with this event.");
@@ -59,15 +78,8 @@ jobs:
               return;
             }
 
-            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              head_sha: pr.head.sha,
-              per_page: 100,
-            });
-
-            const ciRun = runs.workflow_runs.find((run) => run.name === "CI");
-            if (!ciRun || ciRun.conclusion !== "success") {
+            const ciRun = await getSuccessfulCiRun(pr);
+            if (!ciRun) {
               core.info("CI has not completed successfully for the current HEAD SHA.");
               return;
             }

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo-transparent.svg" alt="Weighted Random Assignment Engine logo" width="200"/>
+</p>
+
 # Weighted Random Assignment Engine
 
 A generic weighted random assignment engine with historical penalty support, built in Rust.

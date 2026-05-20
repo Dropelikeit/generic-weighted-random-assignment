@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="nodeA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22D3EE"/>
+      <stop offset="100%" stop-color="#3B82F6"/>
+    </linearGradient>
+    <linearGradient id="nodeB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#A78BFA"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+    <linearGradient id="nodeC" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F472B6"/>
+      <stop offset="100%" stop-color="#EC4899"/>
+    </linearGradient>
+    <linearGradient id="nodeD" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FBBF24"/>
+      <stop offset="100%" stop-color="#FB923C"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#64748B"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#94A3B8"/>
+    </marker>
+    <marker id="arrowHi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#FBBF24"/>
+    </marker>
+  </defs>
+
+  <!-- Subtle dotted orbit -->
+  <circle cx="128" cy="128" r="74" stroke="#94A3B8" stroke-width="1" stroke-dasharray="2 6" opacity="0.5"/>
+
+  <!-- Assignment arcs (directed, derangement cycle) -->
+  <g fill="none" stroke="url(#arc)" stroke-width="2.5" stroke-linecap="round">
+    <path d="M 148 60 A 80 80 0 0 1 196 108" marker-end="url(#arrow)"/>
+    <path d="M 196 148 A 80 80 0 0 1 148 196" marker-end="url(#arrow)"/>
+    <path d="M 60 108 A 80 80 0 0 1 108 60" stroke="#FBBF24" stroke-width="3" marker-end="url(#arrowHi)"/>
+    <path d="M 108 196 A 80 80 0 0 1 60 148" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Participant nodes -->
+  <g transform="translate(128 48)">
+    <circle r="22" fill="url(#nodeA)"/>
+    <circle cx="0" cy="-4" r="6" fill="#0F172A"/>
+    <path d="M -10 11 Q 0 2 10 11 L 10 14 L -10 14 Z" fill="#0F172A"/>
+  </g>
+  <g transform="translate(208 128)">
+    <circle r="22" fill="url(#nodeB)"/>
+    <circle cx="0" cy="-4" r="6" fill="#0F172A"/>
+    <path d="M -10 11 Q 0 2 10 11 L 10 14 L -10 14 Z" fill="#0F172A"/>
+  </g>
+  <g transform="translate(128 208)">
+    <circle r="22" fill="url(#nodeC)"/>
+    <circle cx="0" cy="-4" r="6" fill="#0F172A"/>
+    <path d="M -10 11 Q 0 2 10 11 L 10 14 L -10 14 Z" fill="#0F172A"/>
+  </g>
+  <g transform="translate(48 128)">
+    <circle r="26" fill="url(#nodeD)"/>
+    <circle r="30" fill="none" stroke="#FBBF24" stroke-width="1.5" opacity="0.6"/>
+    <circle cx="0" cy="-5" r="7" fill="#0F172A"/>
+    <path d="M -12 13 Q 0 2 12 13 L 12 16 L -12 16 Z" fill="#0F172A"/>
+  </g>
+
+  <!-- Center weight mark -->
+  <g transform="translate(128 128)">
+    <circle r="16" fill="none" stroke="#FBBF24" stroke-width="2"/>
+    <path d="M -8 -5 L -4 6 L 0 -3 L 4 6 L 8 -5"
+          stroke="#FBBF24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+</svg>

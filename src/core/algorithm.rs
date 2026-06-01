@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use rand::prelude::IndexedRandom;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 
 use super::models::{Assignment, HistoricalPairing};
 use super::penalty::PenaltyStrategy;
@@ -154,7 +154,7 @@ pub fn generate_assignments(
 
     let mut rng = match seed {
         Some(s) => StdRng::seed_from_u64(s),
-        None => StdRng::from_os_rng(),
+        None => rand::make_rng::<StdRng>(),
     };
 
     for attempt in 0..MAX_RETRIES {
